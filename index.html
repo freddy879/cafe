@@ -802,8 +802,10 @@
 <div id="toast"></div>
 
 <script>
-  // URL base inteligente: Si abres el archivo como file:/// apunta automáticamente al servidor Node.js
-  const API_URL = window.location.protocol === 'file:' ? 'https://cafe-u0ox.onrender.com' : '';
+  // URL base inteligente: Corregida para apuntar explícitamente a tu app en producción de Render
+  const API_URL = window.location.protocol === 'file:' 
+    ? 'http://localhost:3000' 
+    : 'https://cafe-u0ox.onrender.com';
 
   let currentUser = null;
   let otherUser = null;
@@ -859,8 +861,8 @@
 
   // ── SOCKET ──
   function initSocket() {
-    // Se conecta usando la URL base inteligente (ej: http://localhost:3000)
-    socket = io(API_URL || undefined); 
+    // Forzamos el uso de la constante API_URL explícita
+    socket = io(API_URL); 
     socket.emit('join', { user: currentUser });
 
     socket.on('message', (msg) => {
@@ -956,7 +958,6 @@
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
 
-    // Se autocompleta la URL del archivo si viene relativa del backend
     const fileFullUrl = (msg.fileUrl && !msg.fileUrl.startsWith('http')) ? `${API_URL}${msg.fileUrl}` : msg.fileUrl;
 
     if (msg.type === 'image' && msg.fileUrl) {
@@ -986,7 +987,7 @@
     container.insertBefore(wrap, typing);
   }
 
-  // ── MEDIA GRID (SIN DUPLICADOS) ──
+  // ── MEDIA GRID ──
   function updateMediaGrid(msgs) {
     const mediaMsgs = msgs.filter(m => m.type === 'image' || m.type === 'video');
     if (mediaMsgs.length === 0) return;
@@ -1162,8 +1163,9 @@
   }
 
   function formatTime(ts) {
+    if (!ts) return '';
     const d = new Date(ts);
-    return d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
   }
 
   function showToast(msg) {
