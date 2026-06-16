@@ -1,15 +1,16 @@
 {
-  "name": "cafe",
+  "name": "lovechat",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^5.1.0",
-    "socket.io": "^4.8.0",
     "mongoose": "^8.18.0",
     "multer": "^2.0.2",
+    "socket.io": "^4.8.0",
     "uuid": "^11.1.0"
   }
 }
