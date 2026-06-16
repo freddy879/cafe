@@ -6,15 +6,28 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+const cors = require('cors'); // 👈 Añadido el módulo CORS
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+
+// Configuración de CORS completa para Socket.IO en Render
+const io = new Server(server, { 
+  cors: { 
+    origin: '*',
+    methods: ["GET", "POST"]
+  } 
+});
+
+// Habilitar CORS para las peticiones HTTP normales (Express)
+app.use(cors());
 
 // MongoDB connection
 const MONGO_URI = 'mongodb+srv://miguelfreddy78_db_user:rlH0wYeNjec78rRF@cluster0.oqhozkg.mongodb.net/lovechat?retryWrites=true&w=majority';
 
-mongoose.connect(MONGO_URI).then(() => console.log('✅ MongoDB conectado')).catch(e => console.error('❌ MongoDB error:', e));
+mongoose.connect(MONGO_URI)
+  .then(() => console.log('✅ MongoDB conectado'))
+  .catch(e => console.error('❌ MongoDB error:', e));
 
 // Schemas
 const MessageSchema = new mongoose.Schema({
@@ -42,7 +55,7 @@ const Message = mongoose.model('Message', MessageSchema);
 const Streak = mongoose.model('Streak', StreakSchema);
 const Miss = mongoose.model('Miss', MissSchema);
 
-// Uploads folder
+// Uploads folder (Usa path.resolve o path.join con __dirname para que funcione bien en Linux/Render)
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
@@ -54,7 +67,11 @@ const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
-app.use(express.static(__dirname));
+
+// 📌 RECOMENDACIÓN PARA EL FRONTEND EN RENDER: 
+// Crea una carpeta llamada 'public' al lado de este archivo de servidor y guarda ahí tu 'index.html'.
+// Con esta línea, Render servirá tu página automáticamente al entrar a tu link.
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Connected users
 const connectedUsers = {};
@@ -156,5 +173,6 @@ io.on('connection', (socket) => {
   });
 });
 
+// 📌 CAMBIO CLAVE: Render inyecta el puerto en process.env.PORT de manera dinámica
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`💕 LoveChat corriendo en http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`💕 LoveChat corriendo en el puerto ${PORT}`));
