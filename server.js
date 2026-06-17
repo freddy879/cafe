@@ -6,34 +6,29 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
-const cors = require('cors'); // 👈 Añadido el módulo CORS
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
 
-// Configuración de CORS completa para Socket.IO en Render
-const io = new Server(server, { 
-  cors: { 
-    origin: '*',
-    methods: ["GET", "POST"]
-  } 
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST', 'DELETE'] }
 });
 
-// Habilitar CORS para las peticiones HTTP normales (Express)
 app.use(cors());
+app.use(express.json());
 
-// MongoDB connection
+// ── MongoDB ──
 const MONGO_URI = 'mongodb+srv://miguelfreddy78_db_user:rlH0wYeNjec78rRF@cluster0.oqhozkg.mongodb.net/lovechat?retryWrites=true&w=majority';
-
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB conectado'))
   .catch(e => console.error('❌ MongoDB error:', e));
 
-// Schemas
+// ── Schemas ──
 const MessageSchema = new mongoose.Schema({
   sender: String,
   text: String,
-  type: { type: String, default: 'text' }, // text, image, video, miss
+  type: { type: String, default: 'text' }, // text | image | video | sticker | miss
   fileUrl: String,
   fileName: String,
   timestamp: { type: Date, default: Date.now }
@@ -52,51 +47,42 @@ const MissSchema = new mongoose.Schema({
 });
 
 const Message = mongoose.model('Message', MessageSchema);
-const Streak = mongoose.model('Streak', StreakSchema);
-const Miss = mongoose.model('Miss', MissSchema);
+const Streak   = mongoose.model('Streak', StreakSchema);
+const Miss     = mongoose.model('Miss', MissSchema);
 
-// Uploads folder (Usa path.resolve o path.join con __dirname para que funcione bien en Linux/Render)
+// ── Uploads ──
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => cb(null, uuidv4() + path.extname(file.originalname))
+  filename:    (req, file, cb) => cb(null, uuidv4() + path.extname(file.originalname))
 });
 const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
-app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
-
-// 📌 RECOMENDACIÓN PARA EL FRONTEND EN RENDER: 
-// Crea una carpeta llamada 'public' al lado de este archivo de servidor y guarda ahí tu 'index.html'.
-// Con esta línea, Render servirá tu página automáticamente al entrar a tu link.
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Connected users
-const connectedUsers = {};
-
-// Streak logic
+// ── Streak logic ──
 async function updateStreak(user) {
   let streak = await Streak.findOne();
   if (!streak) streak = new Streak();
   const now = new Date();
   const today = now.toDateString();
-  
+
   if (user === 'freddy') streak.freddyLastSeen = now;
-  if (user === 'aby') streak.abyLastSeen = now;
+  if (user === 'aby')    streak.abyLastSeen = now;
 
   const fSeen = streak.freddyLastSeen ? new Date(streak.freddyLastSeen).toDateString() : null;
-  const aSeen = streak.abyLastSeen ? new Date(streak.abyLastSeen).toDateString() : null;
+  const aSeen = streak.abyLastSeen    ? new Date(streak.abyLastSeen).toDateString()    : null;
 
   if (fSeen === today && aSeen === today) {
-    const lastActive = streak.lastActive ? new Date(streak.lastActive).toDateString() : null;
-    const yesterday = new Date(now);
+    const lastActive  = streak.lastActive ? new Date(streak.lastActive).toDateString() : null;
+    const yesterday   = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toDateString();
     if (lastActive !== today) {
-      if (lastActive === yesterdayStr) streak.count += 1;
-      else if (lastActive !== today) streak.count = 1;
+      streak.count    = lastActive === yesterdayStr ? streak.count + 1 : 1;
       streak.lastActive = now;
     }
   }
@@ -104,9 +90,9 @@ async function updateStreak(user) {
   return streak;
 }
 
-// Routes
+// ── REST Routes ──
 app.get('/api/messages', async (req, res) => {
-  const msgs = await Message.find().sort({ timestamp: 1 }).limit(100);
+  const msgs = await Message.find().sort({ timestamp: 1 }).limit(200);
   res.json(msgs);
 });
 
@@ -118,20 +104,53 @@ app.get('/api/streak', async (req, res) => {
 
 app.get('/api/miss/last', async (req, res) => {
   const miss = await Miss.findOne().sort({ timestamp: -1 });
-  res.json(miss);
+  res.json(miss || {});
 });
 
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
   const { sender, type } = req.body;
   const fileUrl = `/uploads/${req.file.filename}`;
-  const msg = new Message({ sender, type, fileUrl, fileName: req.file.originalname, text: type === 'image' ? '📷 Foto' : '🎥 Video' });
+  const msg = new Message({
+    sender,
+    type,
+    fileUrl,
+    fileName: req.file.originalname,
+    text: type === 'image' ? '📷 Foto' : '🎥 Video'
+  });
   await msg.save();
   io.emit('message', msg);
   res.json(msg);
 });
 
-// Socket.io
+// FIX: endpoint para borrar mensaje
+app.delete('/api/messages/:id', async (req, res) => {
+  try {
+    const msg = await Message.findById(req.params.id);
+    if (!msg) return res.status(404).json({ error: 'No encontrado' });
+
+    // Borrar archivo físico si existe
+    if (msg.fileUrl) {
+      const filePath = path.join(__dirname, msg.fileUrl);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+
+    await Message.findByIdAndDelete(req.params.id);
+    // Notificar a todos en tiempo real
+    io.emit('message-deleted', { id: req.params.id });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error borrando mensaje:', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// ── Connected users & GPS ──
+const connectedUsers = {};
+// Guarda la última ubicación conocida de cada usuario en memoria
+const userLocations = {};
+
+// ── Socket.io ──
 io.on('connection', (socket) => {
   console.log('🔌 Conectado:', socket.id);
 
@@ -141,12 +160,27 @@ io.on('connection', (socket) => {
     const streak = await updateStreak(user);
     io.emit('streak-update', streak);
     io.emit('online-users', Object.values(connectedUsers));
+
+    // Si el otro ya tenía ubicación guardada, enviársela a quien acaba de entrar
+    const otherUser = user === 'freddy' ? 'aby' : 'freddy';
+    if (userLocations[otherUser]) {
+      socket.emit('partner-location', userLocations[otherUser]);
+    }
   });
 
-  socket.on('send-message', async ({ sender, text }) => {
-    const msg = new Message({ sender, text, type: 'text' });
+  // FIX: send-message ahora guarda el tipo correctamente (sticker, text, etc.)
+  socket.on('send-message', async ({ sender, text, type = 'text' }) => {
+    const msg = new Message({ sender, text, type });
     await msg.save();
     io.emit('message', msg);
+  });
+
+  // FIX: share-location — reenvía la ubicación al otro usuario
+  socket.on('share-location', ({ from, lat, lng }) => {
+    // Guardar en memoria para que quien se conecte después también la reciba
+    userLocations[from] = { lat, lng };
+    // Emitir a todos los demás (solo le llegará a la pareja)
+    socket.broadcast.emit('partner-location', { lat, lng });
   });
 
   socket.on('miss-you', async ({ from }) => {
@@ -155,12 +189,26 @@ io.on('connection', (socket) => {
     io.emit('miss-you-alert', { from, timestamp: miss.timestamp });
   });
 
-  socket.on('typing', ({ user }) => {
-    socket.broadcast.emit('typing', { user });
-  });
+  socket.on('typing',      ({ user }) => socket.broadcast.emit('typing', { user }));
+  socket.on('stop-typing', ()         => socket.broadcast.emit('stop-typing'));
 
-  socket.on('stop-typing', () => {
-    socket.broadcast.emit('stop-typing');
+  // FIX: delete-message via socket (borra en BD y notifica a todos)
+  socket.on('delete-message', async ({ id, user }) => {
+    try {
+      const msg = await Message.findById(id);
+      if (!msg) return;
+      if (msg.sender !== user) return; // solo puede borrar el que lo envió
+
+      if (msg.fileUrl) {
+        const filePath = path.join(__dirname, msg.fileUrl);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
+
+      await Message.findByIdAndDelete(id);
+      io.emit('message-deleted', { id });
+    } catch (err) {
+      console.error('Error borrando via socket:', err);
+    }
   });
 
   socket.on('disconnect', () => {
@@ -173,6 +221,5 @@ io.on('connection', (socket) => {
   });
 });
 
-// 📌 CAMBIO CLAVE: Render inyecta el puerto en process.env.PORT de manera dinámica
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`💕 LoveChat corriendo en el puerto ${PORT}`));
